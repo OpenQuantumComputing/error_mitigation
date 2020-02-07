@@ -2,7 +2,106 @@ import re #because we need regular expressions
 import numpy as np #because we need the random number generator
 from qiskit import QuantumCircuit
 
-twirlingPairs = np.load("TwirlingPairs.npz")["data"]  # created in PauliTwirlingPairFinder.py
+import numpy as np
+
+Pauligateset=['id','x','y','z']
+
+def equal(A, B, tolerance=1E-6, allowPhaseCheck=True):
+    """
+    Returns True if A and B are equal within tolerance tol, element-wise
+    :param A: nxm matrix
+    :param B: nxm matrix
+    :param tolerance: Tolerance
+    :param allowPhaseCheck: True if A and B should be considered equal if they are equal up to a complex phase factor
+    :raises ValueError: if A, B not correct shape
+    :return: True or False
+    """
+    dim0 = A.shape[0]
+    dim1 = A.shape[1]
+    if len(A.shape) > 2 or len(B.shape) > 2:
+        raise ValueError("Both arguments must be n x m matrices.")
+    if dim0 != B.shape[0] or dim1 != B.shape[1]:
+        raise ValueError("Arguments must be of equal dimension.")
+
+    checkPhase = False
+
+    for ind in range(dim0):
+        if checkPhase:
+            break
+        for j in range(dim1):
+            num = np.absolute(A[ind, j] - B[ind, j])
+            if num > tolerance:
+                if allowPhaseCheck:
+                    checkPhase = True  # There might be a (global) phase difference between the matrices
+                else:
+                    return False
+                break
+
+    if checkPhase:# Handle the case A = e^(i * theta) * B
+        first = True
+        eiPhase = 1
+
+        for ind in range(dim0):
+            for j in range(dim1):
+                A_ij = A[ind, j]
+                B_ij = B[ind, j]
+
+                if np.absolute(A_ij) < tolerance:
+                    A_ij = 0
+                if np.absolute(B_ij) < tolerance:
+                    B_ij = 0
+
+                if A_ij == 0 and B_ij == 0:
+                    continue
+                elif (A_ij == 0 and B_ij != 0) or (A_ij != 0 and B_ij == 0):
+                    # If one is zero, multiplying by phase factor does not change anything.
+                    # Therefore, the other must be zero for the matrices to be equal up to a phase factor.
+                    return False
+
+                rel = A_ij / B_ij
+                if np.absolute(np.absolute(rel) - 1) > tolerance:  # a/b must be 1.000... * e^(i * theta)
+                    return False
+                if first:
+                    first = False
+                    eiPhase = rel  # e ^(i * theta)
+                if np.absolute(eiPhase - rel) > tolerance:
+                    return False
+    return True
+
+def getPaulitwirlingPairsCX(printpairs=False):
+    ID1q = np.array([[1, 0], [0, 1]], dtype=np.complex_)
+    sigmaX = np.array([[0, 1], [1, 0]], dtype=np.complex_)
+    sigmaY = np.array([[0, 0 - 1.0j], [0 + 1.0j, 0]], dtype=np.complex_)
+    sigmaZ = np.array([[1, 0], [0, -1]], dtype=np.complex_)
+
+    ID2q = np.kron(ID1q, ID1q)
+
+    tol = 1E-8
+
+    paulis = np.array([ID1q, sigmaX, sigmaY, sigmaZ], dtype=np.complex_)
+
+    cX = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0]], dtype=np.complex_)
+
+    pairs = np.zeros((4, 4, 2), dtype=int)
+
+    for a in range(4):  # sigma_control ^a
+        pauli_ca = paulis[a]
+        for b in range(4):  # sigma_target ^b
+            pauli_tb = paulis[b]
+            for c in range(4):  # sigma_control ^c
+                pauli_cc = paulis[c]
+                for d in range(4):  # sigma_target ^d
+                    pauli_td = paulis[d]
+                    LHS = np.kron(pauli_cc, pauli_td)
+                    RHS = cX @ np.kron(pauli_ca, pauli_tb) @ cX.transpose().conjugate()
+                    if equal(LHS, RHS, tol):
+                        if printpairs:
+                            print(Pauligateset[a],Pauligateset[b],Pauligateset[c],Pauligateset[d])
+                        pairs[a][b][0] = c
+                        pairs[a][b][1] = d
+    return pairs
+
+twirlingPairs = getPaulitwirlingPairsCX()
 
 def create_Paulitwirled_and_noiseamplificatied_circuit(circuit,r,two_error_map,paulitwirling=True,controlledgatename='cx'):
     '''Pauli-twirl and amplify noise of controlled gates in a circuit
@@ -17,7 +116,6 @@ def create_Paulitwirled_and_noiseamplificatied_circuit(circuit,r,two_error_map,p
     Returns:
         new circuit that is Pauli-twirled and errors are amplified by a factor for r
     '''
-    Pauligateset=['id','x','y','z']
     newqasm_str=""
     qs=circuit.qasm()
     qregname=circuit.qregs[0].name
@@ -35,7 +133,7 @@ def create_Paulitwirled_and_noiseamplificatied_circuit(circuit,r,two_error_map,p
             ## Apply Pauli-twirling
             if paulitwirling:
                 indices_ab = np.random.randint(0, 4, 2)
-                indices_cd = twirlingPairs[0][indices_ab[0]][indices_ab[1]]
+                indices_cd = twirlingPairs[indices_ab[0]][indices_ab[1]]
 
                 if indices_ab[0]>0:
                     newqasm_str+=Pauligateset[indices_ab[0]]+" "+qregname+"["+str(control_ind)+"];\n"
