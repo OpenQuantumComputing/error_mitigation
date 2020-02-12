@@ -1,7 +1,12 @@
 import re #because we need regular expressions
 import numpy as np #because we need the random number generator
-from qiskit import QuantumCircuit
+from qiskit import *
 from qiskit.tools.monitor import job_monitor
+
+import sys
+sys.path.append('../')
+
+from qiskit_utilities.utilities import *
 
 import numpy as np
 
@@ -247,9 +252,14 @@ def mitigate(circuit, amplification_factors,\
     circ = transpile(circuit, target_backend, optimization_level=optimization_level)
 
     if is_simulator:
-       # in the case of a simulator,
-       # we do not need to split the runs,
-       # because max_experiments is not limited
+        # in the case of a simulator,
+        # we do not need to split the runs,
+        # because max_experiments is not limited
+        experimentname+="_backend"+execution_backend.name()
+        experimentname+="_noisemodel"+target_backend.name()
+        experimentname+="_shots"+str(num_shots)
+        experimentname+="_experiments"+str(num_experiments)
+        experimentname+="_paulitwirling"+str(paulitwirling)
         for r in amplification_factors:
             name=experimentname+"_r"+str(r)
             result_dict[name] = read_results(name)
@@ -258,6 +268,17 @@ def mitigate(circuit, amplification_factors,\
                     print("Could not read result for job '",name, "' from disk")
                 else:
                     print("Result for job '",name, "' successfully read from disk")
+
+            ### read circuit depth statistics from file
+            if not result_dict[name] == None:
+                with open('results/'+name+'.mean_circuit_depth','r') as f:
+                    mean_depth_dict[name]=float(f.read())
+                with open('results/'+name+'.max_circuit_depth','r') as f:
+                    max_depth_dict[name]=float(f.read())
+                with open('results/'+name+'.mean_transpiled_circuit_depth','r') as f:
+                    mean_depth_transpiled_dict[name]=float(f.read())
+                with open('results/'+name+'.max_transpiled_circuit_depth','r') as f:
+                    max_depth_transpiled_dict[name]=float(f.read())
 
         for r in amplification_factors:
             name=experimentname+"_r"+str(r)
@@ -269,7 +290,7 @@ def mitigate(circuit, amplification_factors,\
             max_depth_transpiled=0
             circuits_r=[]
             for p in range(1,num_experiments+1):
-                if verbose:
+                if verbose and p%25==0:
                     print("Creating circuits for '",name, "'", p, "/",num_experiments, end='\r')
                 circ_tmp = create_Paulitwirled_and_noiseamplified_circuit(\
                                     circuit, r, cx_error_map, paulitwirling)
@@ -287,9 +308,9 @@ def mitigate(circuit, amplification_factors,\
             if verbose:
                 print("Creating circuits for '",name, "'", num_experiments, "/",num_experiments)
             max_depth_dict[name]=max_depth
-            mean_depth_dict[name]=mean_depth
+            mean_depth_dict[name]=mean_depth/num_experiments
             max_depth_transpiled_dict[name]=max_depth_transpiled
-            mean_depth_transpiled_dict[name]=mean_depth_transpiled
+            mean_depth_transpiled_dict[name]=mean_depth_transpiled/num_experiments
             if verbose:
                 print("Starting job for '",name, "'")
             jobs_dict[name] = execute(circuits_r,\
@@ -310,6 +331,16 @@ def mitigate(circuit, amplification_factors,\
                 else:
                     print("Could not write result for job '",name, "' from disk")
 
+            ### write circuit depth statistics to file
+            with open('results/'+name+'.mean_circuit_depth','w') as f:
+                f.write(str(mean_depth_dict[name]))
+            with open('results/'+name+'.max_circuit_depth','w') as f:
+                f.write(str(max_depth_dict[name]))
+            with open('results/'+name+'.mean_transpiled_circuit_depth','w') as f:
+                f.write(str(mean_depth_transpiled_dict[name]))
+            with open('results/'+name+'.max_transpiled_circuit_depth','w') as f:
+                f.write(str(max_depth_transpiled_dict[name]))
+
         first=True
         for r in amplification_factors:
             name=experimentname+"_r"+str(r)
@@ -325,10 +356,10 @@ def mitigate(circuit, amplification_factors,\
             else:
                 E_av=np.append(E_av,E_av_dict[name])## this is not very efficient coding
 
-     else:
-         raise ValueError("not yet implemented, coming soon")
+    else:
+        raise ValueError("not yet implemented, coming soon")
 
-    R=Richardson_extrapolate(E_av.reshape(len(amplification_factors),num_shots),\
+    R=Richardson_extrapolate(E_av.reshape(len(amplification_factors),num_experiments),\
                              np.array(amplification_factors))
 
 
