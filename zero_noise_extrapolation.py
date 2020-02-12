@@ -1,6 +1,7 @@
 import re #because we need regular expressions
 import numpy as np #because we need the random number generator
 from qiskit import QuantumCircuit
+from qiskit.tools.monitor import job_monitor
 
 import numpy as np
 
@@ -103,7 +104,7 @@ def getPaulitwirlingPairsCX(printpairs=False):
 
 twirlingPairs = getPaulitwirlingPairsCX()
 
-def create_Paulitwirled_and_noiseamplificatied_circuit(circuit,r,two_error_map,paulitwirling=True,controlledgatename='cx'):
+def create_Paulitwirled_and_noiseamplified_circuit(circuit,r,two_error_map,paulitwirling=True,controlledgatename='cx'):
     '''Pauli-twirl and amplify noise of controlled gates in a circuit
 
     Args:
@@ -196,3 +197,143 @@ def Richardson_extrapolate(E, c):
         A[k,:] = c**k
     x=np.linalg.solve(A,b)
     return np.dot(np.transpose(E),x)
+
+def mitigate(circuit, amplification_factors,\
+             expectationvalue_fun,\
+             execution_backend, \
+             experimentname, cx_error_map,\
+             num_shots, num_experiments,\
+             target_backend=None, noise_model=None, basis_gates=None,\
+             paulitwirling=True, verbose=True):
+    """
+    this function does not optimize the circuit
+    target_backend: is used if execution_backend is a simulator
+    noisemodel: is used if execution_backend is a simulator
+    this function is implemented with convenience in mind, the classical part can be trivially made more memory efficient
+    """
+    optimization_level=1
+
+    n_qubits = execution_backend.configuration().n_qubits
+    is_simulator = execution_backend.configuration().simulator
+
+    max_depth_dict={}
+    mean_depth_dict={}
+    max_depth_transpiled_dict={}
+    mean_depth_transpiled_dict={}
+    jobs_dict={}
+    E_dict={}
+    E_av_dict={}
+    result_dict={}
+
+    paulitwirling=True
+
+    ### sanity checks
+    if len(amplification_factors)<2:
+        raise ValueError("specify at least 2 amplification factors, e.g., (1,2) ")
+    if is_simulator:
+        if target_backend == None:
+            raise ValueError("you need to specify a taget backend")
+        if noise_model == None:
+            raise ValueError("you need to specify a noise model")
+        if basis_gates == None:
+            raise ValueError("you need to specify basis gates")
+    else:
+        execution_backend = target_backend
+
+    if verbose:
+        print("Sanity checks passed")
+
+    ### transpile circuit to match the target backend
+    circ = transpile(circuit, target_backend, optimization_level=optimization_level)
+
+    if is_simulator:
+       # in the case of a simulator,
+       # we do not need to split the runs,
+       # because max_experiments is not limited
+        for r in amplification_factors:
+            name=experimentname+"_r"+str(r)
+            result_dict[name] = read_results(name)
+            if verbose:
+                if result_dict[name] == None:
+                    print("Could not read result for job '",name, "' from disk")
+                else:
+                    print("Result for job '",name, "' successfully read from disk")
+
+        for r in amplification_factors:
+            name=experimentname+"_r"+str(r)
+            if not result_dict[name] == None:
+                continue
+            mean_depth=0
+            max_depth=0
+            mean_depth_transpiled=0
+            max_depth_transpiled=0
+            circuits_r=[]
+            for p in range(1,num_experiments+1):
+                if verbose:
+                    print("Creating circuits for '",name, "'", p, "/",num_experiments, end='\r')
+                circ_tmp = create_Paulitwirled_and_noiseamplified_circuit(\
+                                    circuit, r, cx_error_map, paulitwirling)
+                depth = circ_tmp.depth()
+                mean_depth += depth
+                max_depth = max(max_depth,depth)
+                # now we can transpile to combine single qubit gates, etc.
+                circ_tmp_transpiled=transpile(circ_tmp,\
+                                              backend=target_backend,\
+                                              optimization_level=optimization_level)
+                circuits_r.append(circ_tmp_transpiled)
+                depth=circ_tmp_transpiled.depth()
+                mean_depth_transpiled += depth
+                max_depth_transpiled = max(max_depth_transpiled,depth)
+            if verbose:
+                print("Creating circuits for '",name, "'", num_experiments, "/",num_experiments)
+            max_depth_dict[name]=max_depth
+            mean_depth_dict[name]=mean_depth
+            max_depth_transpiled_dict[name]=max_depth_transpiled
+            mean_depth_transpiled_dict[name]=mean_depth_transpiled
+            if verbose:
+                print("Starting job for '",name, "'")
+            jobs_dict[name] = execute(circuits_r,\
+                            execution_backend,\
+                            noise_model=noise_model,\
+                            basis_gates=basis_gates,\
+                            shots=num_shots)
+
+        for r in amplification_factors:
+            name=experimentname+"_r"+str(r)
+            if not result_dict[name] == None:
+                continue
+            job_monitor(jobs_dict[name])
+            success = write_results(name,jobs_dict[name])
+            if verbose:
+                if success:
+                    print("Result for job '",name, "' successfully written to disk")
+                else:
+                    print("Could not write result for job '",name, "' from disk")
+
+        first=True
+        for r in amplification_factors:
+            name=experimentname+"_r"+str(r)
+            if result_dict[name] == None:
+                result_dict[name] = read_results(name)
+            E_dict[name] = expectationvalue_fun(result_dict[name])
+            E_av_dict[name] = np.zeros_like(E_dict[name])
+            for j in range(1,num_experiments+1):
+                E_av_dict[name][j-1] = sum(E_dict[name][0:j])/j
+            if first:
+                E_av=E_av_dict[name]
+                first=False
+            else:
+                E_av=np.append(E_av,E_av_dict[name])## this is not very efficient coding
+
+     else:
+         raise ValueError("not yet implemented, coming soon")
+
+    R=Richardson_extrapolate(E_av.reshape(len(amplification_factors),num_shots),\
+                             np.array(amplification_factors))
+
+
+    return R, E_dict, E_av_dict,\
+           max_depth_dict,mean_depth_dict,\
+           max_depth_transpiled_dict,mean_depth_transpiled_dict
+
+
