@@ -166,14 +166,14 @@ def create_Paulitwirled_and_noiseamplified_circuit(circuit,r,two_error_map,pauli
                 # with global indexation for random numbers
                 # 0      4      8      12
                 # 1      5      9      13
-                # 2      6      10     13
-                # 3      7      11     13
+                # 2      6      10     14
+                # 3      7      11     15
                 # and local indexation
                 # 0,0    1,0    2,0    3,0
                 # 0,1    1,1    2,1    3,1
                 # 0,2    1,2    2,2    3,2
                 # 0,3    1,3    2,3    3,3
-                # so we make sure to never draw 0 = (0,0)
+                # so we make sure to never draw 0 = (0,0) = I I
                 ind_ef = np.random.randint(1, 16, 1)
                 ind_e=int(int(ind_ef[0])/4)
                 ind_f=ind_ef[0]%4
@@ -190,9 +190,9 @@ def create_Paulitwirled_and_noiseamplified_circuit(circuit,r,two_error_map,pauli
 def Richardson_extrapolate(E, c):
     n=E.shape[0]
     if c.shape[0] != n:
-        raise Exception('E and c must have the same dimension.')
+        raise ValueError('E and c must have the same dimension.')
     if n<=1:
-        raise Exception('the dimension of E and c must be larger than 1.')
+        raise ValueError('the dimension of E and c must be larger than 1.')
     A = np.zeros((n,n))
     b = np.zeros((n,1))
     #must sum to 1
@@ -211,7 +211,7 @@ def mitigate(circuit, amplification_factors,\
              target_backend=None, noise_model=None, basis_gates=None,\
              paulitwirling=True, verbose=True):
     """
-    this function does not optimize the circuit
+    it is of utter most importance, that the circit is executable on the backend that it is to be executed/targeted for
     target_backend: is used if execution_backend is a simulator
     noisemodel: is used if execution_backend is a simulator
     this function is implemented with convenience in mind, the classical part can be trivially made more memory efficient
@@ -230,8 +230,6 @@ def mitigate(circuit, amplification_factors,\
     E_av_dict={}
     result_dict={}
 
-    paulitwirling=True
-
     ### sanity checks
     if len(amplification_factors)<2:
         raise ValueError("specify at least 2 amplification factors, e.g., (1,2) ")
@@ -247,9 +245,6 @@ def mitigate(circuit, amplification_factors,\
 
     if verbose:
         print("Sanity checks passed")
-
-    ### transpile circuit to match the target backend
-    circ = transpile(circuit, target_backend, optimization_level=optimization_level)
 
     if is_simulator:
         # in the case of a simulator,
@@ -365,6 +360,7 @@ def mitigate(circuit, amplification_factors,\
 
     return R, E_dict, E_av_dict,\
            max_depth_dict,mean_depth_dict,\
-           max_depth_transpiled_dict,mean_depth_transpiled_dict
+           max_depth_transpiled_dict,mean_depth_transpiled_dict,\
+           experimentname
 
 
