@@ -1,6 +1,12 @@
 import re #because we need regular expressions
 import numpy as np #because we need the random number generator
+from numpy.linalg import solve
 from qiskit import *
+
+from qiskit.transpiler import PassManager, PassManagerConfig, CouplingMap
+from qiskit.transpiler.passes import Unroller, Optimize1qGates
+from qiskit.transpiler.preset_passmanagers.level3 import level_3_pass_manager
+
 from qiskit.tools.monitor import job_monitor
 
 import sys
@@ -201,7 +207,7 @@ def Richardson_extrapolate(E, c):
     for k in range(1,n):
         A[k,:] = c**k
     x=np.linalg.solve(A,b)
-    return np.dot(np.transpose(E),x)
+    return np.dot(np.transpose(E),x), x
 
 def mitigate(circuit, amplification_factors,\
              expectationvalue_fun,\
@@ -354,7 +360,7 @@ def mitigate(circuit, amplification_factors,\
     else:
         raise ValueError("not yet implemented, coming soon")
 
-    R=Richardson_extrapolate(E_av.reshape(len(amplification_factors),num_experiments),\
+    R,_=Richardson_extrapolate(E_av.reshape(len(amplification_factors),num_experiments),\
                              np.array(amplification_factors))
 
 
@@ -362,5 +368,3 @@ def mitigate(circuit, amplification_factors,\
            max_depth_dict,mean_depth_dict,\
            max_depth_transpiled_dict,mean_depth_transpiled_dict,\
            experimentname
-
-
